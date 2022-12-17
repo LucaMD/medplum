@@ -2,6 +2,7 @@ import { Filter, Operator as FhirOperator, SortRule } from '@medplum/core';
 import { Resource, ResourceType, SearchParameter } from '@medplum/fhirtypes';
 import { PoolClient } from 'pg';
 import { getClient } from '../../database';
+import { ResourceWrapper } from '../repo';
 import { Column, Condition, Conjunction, DeleteQuery, Disjunction, InsertQuery, Operator, SelectQuery } from '../sql';
 
 /**
@@ -36,9 +37,9 @@ export abstract class LookupTable<T> {
   /**
    * Indexes the resource in the lookup table.
    * @param client The database client.
-   * @param resource The resource to index.
+   * @param wrapper The resource wrapper.
    */
-  abstract indexResource(client: PoolClient, resource: Resource): Promise<void>;
+  abstract indexResource(client: PoolClient, wrapper: ResourceWrapper): Promise<void>;
 
   /**
    * Adds "where" conditions to the select query builder.
@@ -92,15 +93,14 @@ export abstract class LookupTable<T> {
 
   /**
    * Returns the existing list of indexed addresses.
-   * @param resourceType The FHIR resource type.
-   * @param resourceId The FHIR resource ID.
+   * @param wrapper The resource wrapper.
    * @returns Promise for the list of indexed addresses.
    */
-  protected async getExistingValues(resourceType: ResourceType, resourceId: string): Promise<T[]> {
-    const tableName = this.getTableName(resourceType);
+  protected async getExistingValues(wrapper: ResourceWrapper): Promise<T[]> {
+    const tableName = this.getTableName((wrapper.resource as Resource).resourceType);
     return new SelectQuery(tableName)
       .column('content')
-      .where('resourceId', Operator.EQUALS, resourceId)
+      .where('resourceId', Operator.EQUALS, wrapper.id as string)
       .orderBy('index')
       .execute(getClient())
       .then((result) => result.map((row) => JSON.parse(row.content) as T));
@@ -126,11 +126,11 @@ export abstract class LookupTable<T> {
 
   /**
    * Deletes the resource from the lookup table.
-   * @param resource The resource to delete.
+   * @param wrapper The resource wrapper.
    */
-  async deleteValuesForResource(resource: Resource): Promise<void> {
-    const tableName = this.getTableName(resource.resourceType);
-    const resourceId = resource.id as string;
+  async deleteValuesForResource(wrapper: ResourceWrapper): Promise<void> {
+    const tableName = this.getTableName((wrapper.resource as Resource).resourceType);
+    const resourceId = wrapper.id as string;
     const client = getClient();
     await new DeleteQuery(tableName).where('resourceId', Operator.EQUALS, resourceId).execute(client);
   }

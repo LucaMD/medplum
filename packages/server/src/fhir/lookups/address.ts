@@ -2,6 +2,7 @@ import { formatAddress, stringify } from '@medplum/core';
 import { Address, Resource, SearchParameter } from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
+import { ResourceWrapper } from '../repo';
 import { LookupTable } from './lookuptable';
 import { compareArrays } from './util';
 
@@ -77,24 +78,23 @@ export class AddressTable extends LookupTable<Address> {
    * Indexes a resource Address values.
    * Attempts to reuse existing Addresses if they are correct.
    * @param client The database client.
-   * @param resource The resource to index.
-   * @returns Promise on completion.
+   * @param wrapper The resource wrapper.
    */
-  async indexResource(client: PoolClient, resource: Resource): Promise<void> {
+  async indexResource(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
+    const resource = wrapper.resource as Resource;
     const addresses = this.#getIncomingAddresses(resource);
     if (!addresses || !Array.isArray(addresses)) {
       return;
     }
 
-    const resourceType = resource.resourceType;
-    const resourceId = resource.id as string;
-    const existing = await this.getExistingValues(resourceType, resourceId);
+    const existing = await this.getExistingValues(wrapper);
 
     if (!compareArrays(addresses, existing)) {
       if (existing.length > 0) {
-        await this.deleteValuesForResource(resource);
+        await this.deleteValuesForResource(wrapper);
       }
 
+      const resourceId = wrapper.id as string;
       const values = [];
 
       for (let i = 0; i < addresses.length; i++) {
@@ -113,7 +113,7 @@ export class AddressTable extends LookupTable<Address> {
         });
       }
 
-      await this.insertValuesForResource(client, resourceType, values);
+      await this.insertValuesForResource(client, resource.resourceType, values);
     }
   }
 

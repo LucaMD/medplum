@@ -160,9 +160,33 @@ export interface RepositoryContext {
   extendedMode?: boolean;
 }
 
-export interface CacheEntry<T extends Resource> {
-  resource: T;
-  projectId: string;
+/**
+ * The ResourceWrapper interface defines a structure that wraps a FHIR resource and includes internal metadata.
+ * There is a critical difference between the internal database ID and the FHIR resource ID.
+ * The internal database ID is the primary key of the resource in the database.
+ * The internal database ID is a globally unique UUID.
+ * The FHIR resource ID is an arbitrary string that is unique within the scope of a project.
+ */
+export interface ResourceWrapper<T extends Resource = Resource> {
+  /**
+   * The database primary key ID of the resource.
+   * Note that this is not the same as the resource ID.
+   * The resource ID is the "id" field of the resource.
+   * In the database, the resource ID is in the "fhirId" column.
+   */
+  id: string;
+
+  /**
+   * The Medplum project ID of the project that contains this resource.
+   * Can be null for public resources.
+   */
+  projectId?: string;
+
+  /**
+   * The FHIR resource.
+   * The value is undefined if the resource is deleted.
+   */
+  resource?: T;
 }
 
 /**
@@ -241,7 +265,12 @@ export class Repository {
 
   async readResource<T extends Resource>(resourceType: string, id: string): Promise<T> {
     try {
-      const result = this.#removeHiddenFields(await this.#readResourceImpl<T>(resourceType, id));
+      const wrapper = await this.#readResourceImpl<T>(resourceType, id);
+      const resource = wrapper.resource;
+      if (!resource) {
+        throw gone;
+      }
+      const result = this.#removeHiddenFields(resource);
       this.#logEvent(ReadInteraction, AuditEventOutcome.Success, undefined, result);
       return result;
     } catch (err) {
@@ -250,7 +279,7 @@ export class Repository {
     }
   }
 
-  async #readResourceImpl<T extends Resource>(resourceType: string, id: string): Promise<T> {
+  async #readResourceImpl<T extends Resource>(resourceType: string, id: string): Promise<ResourceWrapper<T>> {
     if (!id || !validator.isUUID(id)) {
       throw notFound;
     }
@@ -262,7 +291,7 @@ export class Repository {
     }
 
     if (!this.#context.accessPolicy) {
-      const cacheRecord = await getCacheEntry<T>(resourceType, id);
+      const cacheRecord = await getCacheEntry<T>(this.#context.project, resourceType, id);
       if (cacheRecord) {
         if (
           !this.#isSuperAdmin() &&
@@ -272,12 +301,17 @@ export class Repository {
         ) {
           throw notFound;
         }
-        return cacheRecord.resource;
+        return cacheRecord;
       }
     }
 
     const client = getClient();
-    const builder = new SelectQuery(resourceType).column('content').column('deleted').where('id', Operator.EQUALS, id);
+    const builder = new SelectQuery(resourceType)
+      .column('id')
+      .column('projectId')
+      .column('content')
+      .column('deleted')
+      .where('fhirId', Operator.EQUALS, id);
 
     this.#addSecurityFilters(builder, resourceType);
 
@@ -286,13 +320,9 @@ export class Repository {
       throw notFound;
     }
 
-    if (rows[0].deleted) {
-      throw gone;
-    }
-
-    const resource = JSON.parse(rows[0].content as string) as T;
-    await setCacheEntry(resource);
-    return resource;
+    const wrapper = rowToWrapper<T>(rows[0]);
+    await setCacheEntry(this.#context.project, resourceType, id, wrapper);
+    return wrapper;
   }
 
   async readReference<T extends Resource>(reference: Reference<T>): Promise<T> {
@@ -316,14 +346,7 @@ export class Repository {
    */
   async readHistory<T extends Resource>(resourceType: string, id: string): Promise<Bundle<T>> {
     try {
-      let resource: T | undefined = undefined;
-      try {
-        resource = await this.#readResourceImpl<T>(resourceType, id);
-      } catch (err) {
-        if (!isGone(err as OperationOutcome)) {
-          throw err;
-        }
-      }
+      const wrapper = await this.#readResourceImpl<T>(resourceType, id);
 
       const client = getClient();
       const rows = await new SelectQuery(resourceType + '_History')
@@ -331,7 +354,7 @@ export class Repository {
         .column('id')
         .column('content')
         .column('lastUpdated')
-        .where('id', Operator.EQUALS, id)
+        .where('id', Operator.EQUALS, wrapper.id)
         .orderBy('lastUpdated', true)
         .limit(100)
         .execute(client);
@@ -369,7 +392,7 @@ export class Repository {
         });
       }
 
-      this.#logEvent(HistoryInteraction, AuditEventOutcome.Success, undefined, resource);
+      this.#logEvent(HistoryInteraction, AuditEventOutcome.Success, undefined, wrapper.resource);
       return {
         resourceType: 'Bundle',
         type: 'history',
@@ -387,12 +410,11 @@ export class Repository {
         throw notFound;
       }
 
-      await this.#readResourceImpl<T>(resourceType, id);
-
+      const wrapper = await this.#readResourceImpl<T>(resourceType, id);
       const client = getClient();
       const rows = await new SelectQuery(resourceType + '_History')
         .column('content')
-        .where('id', Operator.EQUALS, id)
+        .where('id', Operator.EQUALS, wrapper.id)
         .where('versionId', Operator.EQUALS, vid)
         .execute(client);
 
@@ -440,7 +462,8 @@ export class Repository {
       throw forbidden;
     }
 
-    const existing = await this.#checkExistingResource<T>(resourceType, id, create);
+    const existingWrapper = await this.#checkExistingResource<T>(resourceType, id, create);
+    const existing = existingWrapper?.resource;
 
     if (await this.#isTooManyVersions(resourceType, id, create)) {
       throw tooManyRequests;
@@ -493,15 +516,21 @@ export class Repository {
       throw forbidden;
     }
 
+    const wrapper: ResourceWrapper<T> = {
+      id: existingWrapper?.id || randomUUID(),
+      projectId: project,
+      resource: result,
+    };
+
     // Note: We don't try/catch this because if connecting throws an exception.
     // We don't need to dispose of the client (it will be undefined).
     // https://node-postgres.com/features/transactions
     const client = await getClient().connect();
     try {
       await client.query('BEGIN');
-      await this.#writeResource(client, result);
-      await this.#writeResourceVersion(client, result);
-      await this.#writeLookupTables(client, result);
+      await this.#writeResource(client, wrapper);
+      await this.#writeResourceVersion(client, wrapper);
+      await this.#writeLookupTables(client, wrapper);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -510,7 +539,7 @@ export class Repository {
       client.release();
     }
 
-    await setCacheEntry(result);
+    await setCacheEntry(project, resourceType, id, wrapper);
     await addBackgroundJobs(result);
     this.#removeHiddenFields(result);
     return result;
@@ -531,7 +560,7 @@ export class Repository {
     resourceType: string,
     id: string,
     create: boolean
-  ): Promise<T | undefined> {
+  ): Promise<ResourceWrapper<T> | undefined> {
     try {
       return await this.#readResourceImpl<T>(resourceType, id);
     } catch (err) {
@@ -558,7 +587,7 @@ export class Repository {
   /**
    * Returns true if the resource has too many versions within the specified time period.
    * @param resourceType The resource type.
-   * @param id The resource ID.
+   * @param id The internal resource ID.
    * @param create If true, then the resource is being created.
    * @returns True if the resource has too many versions within the specified time period.
    */
@@ -607,12 +636,12 @@ export class Repository {
     }
 
     const client = getClient();
-    const builder = new SelectQuery(resourceType).column({ tableName: resourceType, columnName: 'content' });
+    const builder = new SelectQuery(resourceType).column('id').column('projectId').column('content').column('deleted');
     this.#addDeletedFilter(builder);
 
     await builder.executeCursor(client, async (row: any) => {
       try {
-        await this.#reindexResourceImpl(JSON.parse(row.content) as Resource);
+        await this.#reindexResourceImpl(rowToWrapper(row));
       } catch (err) {
         logger.error('Failed to reindex resource', normalizeErrorString(err));
       }
@@ -626,23 +655,33 @@ export class Repository {
    * @param resourceType The resource type.
    * @param id The resource ID.
    */
-  async reindexResource<T extends Resource>(resourceType: string, id: string): Promise<T> {
+  async reindexResource<T extends Resource>(resourceType: string, id: string): Promise<void> {
     if (!this.#isSuperAdmin()) {
       throw forbidden;
     }
 
-    const resource = await this.#readResourceImpl<T>(resourceType, id);
-    return this.#reindexResourceImpl(resource);
+    const wrapper = await this.#readResourceImpl<T>(resourceType, id);
+    if (!wrapper.resource) {
+      throw gone;
+    }
+
+    return this.#reindexResourceImpl(wrapper);
   }
 
   /**
    * Internal implementation of reindexing a resource.
    * This accepts a resource as a parameter, rather than a resource type and ID.
    * When doing a bulk reindex, this will be more efficient because it avoids unnecessary reads.
-   * @param resource The resource.
+   * @param wrapper The resource wrapper.
    * @returns The reindexed resource.
    */
-  async #reindexResourceImpl<T extends Resource>(resource: T): Promise<T> {
+  async #reindexResourceImpl<T extends Resource>(wrapper: ResourceWrapper<T>): Promise<void> {
+    const resource = wrapper.resource;
+    if (!resource) {
+      // If the resource is deleted, nothing to do.
+      return;
+    }
+
     (resource.meta as Meta).compartment = this.#getCompartments(resource);
 
     // Note: We don't try/catch this because if connecting throws an exception.
@@ -651,8 +690,8 @@ export class Repository {
     const client = await getClient().connect();
     try {
       await client.query('BEGIN');
-      await this.#writeResource(client, resource);
-      await this.#writeLookupTables(client, resource);
+      await this.#writeResource(client, wrapper);
+      await this.#writeLookupTables(client, wrapper);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -660,8 +699,6 @@ export class Repository {
     } finally {
       client.release();
     }
-
-    return resource;
   }
 
   /**
@@ -671,31 +708,40 @@ export class Repository {
    * @param resourceType The resource type.
    * @param id The resource ID.
    */
-  async resendSubscriptions<T extends Resource>(resourceType: string, id: string): Promise<T> {
+  async resendSubscriptions<T extends Resource>(resourceType: string, id: string): Promise<void> {
     if (!this.#isSuperAdmin() && !this.#context.projectAdmin) {
       throw forbidden;
     }
 
-    const resource = await this.#readResourceImpl<T>(resourceType, id);
-    await addSubscriptionJobs(resource);
-    return resource as T;
+    const wrapper = await this.#readResourceImpl<T>(resourceType, id);
+    if (!wrapper.resource) {
+      throw gone;
+    }
+
+    await addSubscriptionJobs(wrapper.resource);
   }
 
   async deleteResource(resourceType: string, id: string): Promise<void> {
     try {
-      const resource = await this.#readResourceImpl(resourceType, id);
+      const wrapper = await this.#readResourceImpl(resourceType, id);
+      const resource = wrapper.resource;
+      if (!resource) {
+        throw gone;
+      }
 
       if (!this.#canWriteResourceType(resourceType)) {
         throw forbidden;
       }
 
-      await deleteCacheEntry(resourceType, id);
+      await deleteCacheEntry(this.#context.project, resourceType, id);
 
       const client = getClient();
       const lastUpdated = new Date();
       const content = '';
       const columns: Record<string, any> = {
-        id,
+        id: wrapper.id,
+        fhirId: resource.id,
+        projectId: resource.meta?.project,
         lastUpdated,
         deleted: true,
         compartments: this.#getCompartments(resource).map((ref) => resolveId(ref)),
@@ -706,14 +752,14 @@ export class Repository {
 
       await new InsertQuery(resourceType + '_History', [
         {
-          id,
+          id: wrapper.id,
           versionId: randomUUID(),
           lastUpdated,
           content,
         },
       ]).execute(client);
 
-      await this.#deleteFromLookupTables(resource);
+      await this.#deleteFromLookupTables(wrapper);
       this.#logEvent(DeleteInteraction, AuditEventOutcome.Success, undefined, resource);
     } catch (err) {
       this.#logEvent(DeleteInteraction, AuditEventOutcome.MinorFailure, err);
@@ -723,7 +769,11 @@ export class Repository {
 
   async patchResource(resourceType: string, id: string, patch: Operation[]): Promise<Resource> {
     try {
-      const resource = await this.#readResourceImpl(resourceType, id);
+      const wrapper = await this.#readResourceImpl(resourceType, id);
+      const resource = wrapper.resource;
+      if (!resource) {
+        throw gone;
+      }
 
       let patchResult;
       try {
@@ -1066,7 +1116,12 @@ export class Repository {
     }
 
     if (code === '_id') {
-      this.#addTokenSearchFilter(predicate, resourceType, { columnName: 'id', type: SearchParameterType.TEXT }, filter);
+      this.#addTokenSearchFilter(
+        predicate,
+        resourceType,
+        { columnName: 'fhirId', type: SearchParameterType.TEXT },
+        filter
+      );
     } else if (code === '_lastUpdated') {
       this.#addDateSearchFilter(predicate, { type: SearchParameterType.DATETIME, columnName: 'lastUpdated' }, filter);
     } else if (code === '_compartment' || code === '_project') {
@@ -1208,16 +1263,18 @@ export class Repository {
    * This builds all search parameter columns.
    * This does *not* write the version to the history table.
    * @param client The database client inside the transaction.
-   * @param resource The resource.
+   * @param wrapper The resource wrapper.
    */
-  async #writeResource(client: PoolClient, resource: Resource): Promise<void> {
+  async #writeResource(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
+    const resource = wrapper.resource as Resource;
     const resourceType = resource.resourceType;
     const meta = resource.meta as Meta;
     const compartments = meta.compartment?.map((ref) => resolveId(ref));
     const content = stringify(resource);
 
     const columns: Record<string, any> = {
-      id: resource.id,
+      id: wrapper.id,
+      fhirId: resource.id,
       lastUpdated: meta.lastUpdated,
       deleted: false,
       compartments,
@@ -1237,16 +1294,17 @@ export class Repository {
   /**
    * Writes a version of the resource to the resource history table.
    * @param client The database client inside the transaction.
-   * @param resource The resource.
+   * @param wrapper The resource wrapper.
    */
-  async #writeResourceVersion(client: PoolClient, resource: Resource): Promise<void> {
+  async #writeResourceVersion(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
+    const resource = wrapper.resource as Resource;
     const resourceType = resource.resourceType;
     const meta = resource.meta as Meta;
     const content = stringify(resource);
 
     await new InsertQuery(resourceType + '_History', [
       {
-        id: resource.id,
+        id: wrapper.id,
         versionId: meta.versionId,
         lastUpdated: meta.lastUpdated,
         content,
@@ -1497,15 +1555,15 @@ export class Repository {
    * @param client The database client inside the transaction.
    * @param resource
    */
-  async #writeLookupTables(client: PoolClient, resource: Resource): Promise<void> {
+  async #writeLookupTables(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
     for (const lookupTable of lookupTables) {
-      await lookupTable.indexResource(client, resource);
+      await lookupTable.indexResource(client, wrapper);
     }
   }
 
-  async #deleteFromLookupTables(resource: Resource): Promise<void> {
+  async #deleteFromLookupTables(wrapper: ResourceWrapper): Promise<void> {
     for (const lookupTable of lookupTables) {
-      await lookupTable.deleteValuesForResource(resource);
+      await lookupTable.deleteValuesForResource(wrapper);
     }
   }
 
@@ -1883,26 +1941,40 @@ export class Repository {
   }
 }
 
+function rowToWrapper<T extends Resource = Resource>(row: any): ResourceWrapper<T> {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    resource: row.content ? (JSON.parse(row.content) as T) : undefined,
+  };
+}
+
 /**
  * Tries to read a cache entry from Redis by resource type and ID.
  * @param resourceType The resource type.
  * @param id The resource ID.
  * @returns The cache entry if found; otherwise, undefined.
  */
-async function getCacheEntry<T extends Resource>(resourceType: string, id: string): Promise<CacheEntry<T> | undefined> {
-  const cachedValue = await getRedis().get(getCacheKey(resourceType, id));
-  return cachedValue ? (JSON.parse(cachedValue) as CacheEntry<T>) : undefined;
+async function getCacheEntry<T extends Resource>(
+  projectId: string | undefined,
+  resourceType: string,
+  id: string
+): Promise<ResourceWrapper<T> | undefined> {
+  const cachedValue = await getRedis().get(getCacheKey(projectId, resourceType, id));
+  return cachedValue ? (JSON.parse(cachedValue) as ResourceWrapper<T>) : undefined;
 }
 
 /**
  * Writes a cache entry to Redis.
  * @param resource The resource to cache.
  */
-async function setCacheEntry(resource: Resource): Promise<void> {
-  await getRedis().set(
-    getCacheKey(resource.resourceType, resource.id as string),
-    JSON.stringify({ resource, projectId: resource.meta?.project })
-  );
+async function setCacheEntry(
+  projectId: string | undefined,
+  resourceType: string,
+  id: string,
+  wrapper: ResourceWrapper
+): Promise<void> {
+  await getRedis().set(getCacheKey(projectId, resourceType, id), JSON.stringify(wrapper));
 }
 
 /**
@@ -1910,8 +1982,8 @@ async function setCacheEntry(resource: Resource): Promise<void> {
  * @param resourceType The resource type.
  * @param id The resource ID.
  */
-async function deleteCacheEntry(resourceType: string, id: string): Promise<void> {
-  await getRedis().del(getCacheKey(resourceType, id));
+async function deleteCacheEntry(projectId: string | undefined, resourceType: string, id: string): Promise<void> {
+  await getRedis().del(getCacheKey(projectId, resourceType, id));
 }
 
 /**
@@ -1920,8 +1992,15 @@ async function deleteCacheEntry(resourceType: string, id: string): Promise<void>
  * @param id The resource ID.
  * @returns The Redis cache key.
  */
-function getCacheKey(resourceType: string, id: string): string {
-  return `${resourceType}/${id}`;
+function getCacheKey(projectId: string | undefined, resourceType: string, id: string | undefined): string {
+  if (
+    publicResourceTypes.includes(resourceType) ||
+    protectedResourceTypes.includes(resourceType) ||
+    resourceType === 'ClientApplication'
+  ) {
+    return `system/${resourceType}/${id}`;
+  }
+  return `${projectId}/${resourceType}/${id}`;
 }
 
 /**

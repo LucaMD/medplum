@@ -100,6 +100,8 @@ function buildCreateTables(b: FileBuilder, resourceType: string, fhirType: TypeS
 
   const columns = [
     '"id" UUID NOT NULL PRIMARY KEY',
+    '"projectId" UUID NOT NULL PRIMARY KEY',
+    '"fhirId" TEXT NOT NULL PRIMARY KEY',
     '"content" TEXT NOT NULL',
     '"lastUpdated" TIMESTAMP WITH TIME ZONE NOT NULL',
     '"deleted" BOOLEAN NOT NULL DEFAULT FALSE',
@@ -170,6 +172,12 @@ function buildCreateTables(b: FileBuilder, resourceType: string, fhirType: TypeS
   builder.append(`await client.query('CREATE INDEX ON "${resourceType}_Token" ("code")');`);
   builder.append(`await client.query('CREATE INDEX ON "${resourceType}_Token" ("system")');`);
   builder.append(`await client.query('CREATE INDEX ON "${resourceType}_Token" ("value")');`);
+
+  builder.append(`await client.query('ALTER TABLE "${resourceType}" ADD COLUMN "projectId" UUID');`);
+  builder.append(`await client.query('ALTER TABLE "${resourceType}" ADD COLUMN "fhirId" TEXT');`);
+  builder.append(`await client.query('CREATE INDEX ON "${resourceType}" ("projectId")');`);
+  builder.append(`await client.query('CREATE INDEX ON "${resourceType}" ("fhirId")');`);
+  builder.append(`await client.query('UPDATE "${resourceType}" SET "fhirId"="id"');`);
   builder.newLine();
 }
 
@@ -188,18 +196,6 @@ function buildSearchColumns(resourceType: string): string[] {
     const columnName = details.columnName;
     const newColumnType = getColumnType(details);
     result.push(`"${columnName}" ${newColumnType}`);
-
-    if (searchParam.type === 'date' && details.type === SearchParameterType.DATETIME) {
-      if (details.array) {
-        builder.append(
-          `await client.query('ALTER TABLE "${resourceType}" ALTER COLUMN "${columnName}" TYPE ${newColumnType} USING \\'{}\\'::TIMESTAMP WITH TIME ZONE[]');`
-        );
-      } else {
-        builder.append(
-          `await client.query('ALTER TABLE "${resourceType}" ALTER COLUMN "${columnName}" TYPE ${newColumnType} USING NULL');`
-        );
-      }
-    }
   }
   return result;
 }
