@@ -266,10 +266,7 @@ export class Repository {
   async readResource<T extends Resource>(resourceType: string, id: string): Promise<T> {
     try {
       const wrapper = await this.#readResourceImpl<T>(resourceType, id);
-      const resource = wrapper.resource;
-      if (!resource) {
-        throw gone;
-      }
+      const resource = wrapper.resource as T;
       const result = this.#removeHiddenFields(resource);
       this.#logEvent(ReadInteraction, AuditEventOutcome.Success, undefined, result);
       return result;
@@ -279,7 +276,11 @@ export class Repository {
     }
   }
 
-  async #readResourceImpl<T extends Resource>(resourceType: string, id: string): Promise<ResourceWrapper<T>> {
+  async #readResourceImpl<T extends Resource>(
+    resourceType: string,
+    id: string,
+    allowGone = false
+  ): Promise<ResourceWrapper<T>> {
     if (!id || !validator.isUUID(id)) {
       throw notFound;
     }
@@ -320,6 +321,10 @@ export class Repository {
       throw notFound;
     }
 
+    if (rows[0].deleted && !allowGone) {
+      throw gone;
+    }
+
     const wrapper = rowToWrapper<T>(rows[0]);
     await setCacheEntry(this.#context.project, resourceType, id, wrapper);
     return wrapper;
@@ -346,8 +351,7 @@ export class Repository {
    */
   async readHistory<T extends Resource>(resourceType: string, id: string): Promise<Bundle<T>> {
     try {
-      const wrapper = await this.#readResourceImpl<T>(resourceType, id);
-
+      const wrapper = await this.#readResourceImpl<T>(resourceType, id, true);
       const client = getClient();
       const rows = await new SelectQuery(resourceType + '_History')
         .column('versionId')
@@ -661,10 +665,6 @@ export class Repository {
     }
 
     const wrapper = await this.#readResourceImpl<T>(resourceType, id);
-    if (!wrapper.resource) {
-      throw gone;
-    }
-
     return this.#reindexResourceImpl(wrapper);
   }
 
@@ -714,20 +714,17 @@ export class Repository {
     }
 
     const wrapper = await this.#readResourceImpl<T>(resourceType, id);
-    if (!wrapper.resource) {
-      throw gone;
-    }
-
-    await addSubscriptionJobs(wrapper.resource);
+    return addSubscriptionJobs(wrapper.resource as T);
   }
 
   async deleteResource(resourceType: string, id: string): Promise<void> {
+    // Note: We don't try/catch this because if connecting throws an exception.
+    // We don't need to dispose of the client (it will be undefined).
+    // https://node-postgres.com/features/transactions
+    const client = await getClient().connect();
     try {
       const wrapper = await this.#readResourceImpl(resourceType, id);
-      const resource = wrapper.resource;
-      if (!resource) {
-        throw gone;
-      }
+      const resource = wrapper.resource as Resource;
 
       if (!this.#canWriteResourceType(resourceType)) {
         throw forbidden;
@@ -735,7 +732,6 @@ export class Repository {
 
       await deleteCacheEntry(this.#context.project, resourceType, id);
 
-      const client = getClient();
       const lastUpdated = new Date();
       const content = '';
       const columns: Record<string, any> = {
@@ -759,21 +755,22 @@ export class Repository {
         },
       ]).execute(client);
 
-      await this.#deleteFromLookupTables(wrapper);
+      await this.#deleteFromLookupTables(client, wrapper);
+      await client.query('COMMIT');
       this.#logEvent(DeleteInteraction, AuditEventOutcome.Success, undefined, resource);
     } catch (err) {
+      await client.query('ROLLBACK');
       this.#logEvent(DeleteInteraction, AuditEventOutcome.MinorFailure, err);
       throw err;
+    } finally {
+      client.release();
     }
   }
 
-  async patchResource(resourceType: string, id: string, patch: Operation[]): Promise<Resource> {
+  async patchResource<T extends Resource>(resourceType: string, id: string, patch: Operation[]): Promise<T> {
     try {
-      const wrapper = await this.#readResourceImpl(resourceType, id);
-      const resource = wrapper.resource;
-      if (!resource) {
-        throw gone;
-      }
+      const wrapper = await this.#readResourceImpl<T>(resourceType, id);
+      const resource = wrapper.resource as T;
 
       let patchResult;
       try {
@@ -1551,9 +1548,9 @@ export class Repository {
   }
 
   /**
-   *
+   * Writes values to lookup tables.
    * @param client The database client inside the transaction.
-   * @param resource
+   * @param wrapper The resource wrapper.
    */
   async #writeLookupTables(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
     for (const lookupTable of lookupTables) {
@@ -1561,9 +1558,14 @@ export class Repository {
     }
   }
 
-  async #deleteFromLookupTables(wrapper: ResourceWrapper): Promise<void> {
+  /**
+   * Deletes values from lookup tables.
+   * @param client The database client inside the transaction.
+   * @param wrapper The resource wrapper.
+   */
+  async #deleteFromLookupTables(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
     for (const lookupTable of lookupTables) {
-      await lookupTable.deleteValuesForResource(wrapper);
+      await lookupTable.deleteValuesForResource(client, wrapper);
     }
   }
 

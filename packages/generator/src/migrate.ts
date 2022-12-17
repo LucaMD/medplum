@@ -120,6 +120,8 @@ function buildCreateTables(b: FileBuilder, resourceType: string, fhirType: TypeS
   b.append(')`);');
   b.newLine();
 
+  b.append(`await client.query('CREATE INDEX ON "${resourceType}" ("projectId")');`);
+  b.append(`await client.query('CREATE INDEX ON "${resourceType}" ("fhirId")');`);
   b.append(`await client.query('CREATE INDEX ON "${resourceType}" ("lastUpdated")');`);
   b.append(`await client.query('CREATE INDEX ON "${resourceType}" USING GIN("compartments")');`);
   b.newLine();

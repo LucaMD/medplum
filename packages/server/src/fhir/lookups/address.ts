@@ -87,11 +87,11 @@ export class AddressTable extends LookupTable<Address> {
       return;
     }
 
-    const existing = await this.getExistingValues(wrapper);
+    const existing = await this.getExistingValues(client, wrapper);
 
     if (!compareArrays(addresses, existing)) {
       if (existing.length > 0) {
-        await this.deleteValuesForResource(wrapper);
+        await this.deleteValuesForResource(client, wrapper);
       }
 
       const resourceId = wrapper.id as string;

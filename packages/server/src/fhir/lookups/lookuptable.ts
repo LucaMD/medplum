@@ -1,7 +1,6 @@
 import { Filter, Operator as FhirOperator, SortRule } from '@medplum/core';
 import { Resource, ResourceType, SearchParameter } from '@medplum/fhirtypes';
 import { PoolClient } from 'pg';
-import { getClient } from '../../database';
 import { ResourceWrapper } from '../repo';
 import { Column, Condition, Conjunction, DeleteQuery, Disjunction, InsertQuery, Operator, SelectQuery } from '../sql';
 
@@ -93,16 +92,17 @@ export abstract class LookupTable<T> {
 
   /**
    * Returns the existing list of indexed addresses.
+   * @param client The database client.
    * @param wrapper The resource wrapper.
    * @returns Promise for the list of indexed addresses.
    */
-  protected async getExistingValues(wrapper: ResourceWrapper): Promise<T[]> {
+  protected async getExistingValues(client: PoolClient, wrapper: ResourceWrapper): Promise<T[]> {
     const tableName = this.getTableName((wrapper.resource as Resource).resourceType);
     return new SelectQuery(tableName)
       .column('content')
       .where('resourceId', Operator.EQUALS, wrapper.id as string)
       .orderBy('index')
-      .execute(getClient())
+      .execute(client)
       .then((result) => result.map((row) => JSON.parse(row.content) as T));
   }
 
@@ -126,12 +126,12 @@ export abstract class LookupTable<T> {
 
   /**
    * Deletes the resource from the lookup table.
+   * @param client The database client.
    * @param wrapper The resource wrapper.
    */
-  async deleteValuesForResource(wrapper: ResourceWrapper): Promise<void> {
+  async deleteValuesForResource(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
     const tableName = this.getTableName((wrapper.resource as Resource).resourceType);
-    const resourceId = wrapper.id as string;
-    const client = getClient();
+    const resourceId = wrapper.id;
     await new DeleteQuery(tableName).where('resourceId', Operator.EQUALS, resourceId).execute(client);
   }
 }

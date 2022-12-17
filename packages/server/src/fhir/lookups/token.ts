@@ -18,7 +18,6 @@ import {
   SearchParameter,
 } from '@medplum/fhirtypes';
 import { PoolClient } from 'pg';
-import { getClient } from '../../database';
 import { ResourceWrapper } from '../repo';
 import { Column, Condition, Conjunction, Disjunction, Expression, Operator, SelectQuery } from '../sql';
 import { getSearchParameters } from '../structure';
@@ -75,11 +74,11 @@ export class TokenTable extends LookupTable<Token> {
   async indexResource(client: PoolClient, wrapper: ResourceWrapper): Promise<void> {
     const resource = wrapper.resource as Resource;
     const tokens = getTokens(resource);
-    const existing = await getExistingValues(wrapper);
+    const existing = await getExistingValues(client, wrapper);
 
     if (!compareArrays(tokens, existing)) {
       if (existing.length > 0) {
-        await this.deleteValuesForResource(wrapper);
+        await this.deleteValuesForResource(client, wrapper);
       }
 
       const resourceId = wrapper.id as string;
@@ -310,10 +309,11 @@ function buildSimpleToken(
 
 /**
  * Returns the existing list of indexed tokens.
+ * @param client The database client.
  * @param wrapper The resource wrapper.
  * @returns Promise for the list of indexed tokens.
  */
-async function getExistingValues(wrapper: ResourceWrapper): Promise<Token[]> {
+async function getExistingValues(client: PoolClient, wrapper: ResourceWrapper): Promise<Token[]> {
   const tableName = getTableName((wrapper.resource as Resource).resourceType);
   return new SelectQuery(tableName)
     .column('code')
@@ -321,7 +321,7 @@ async function getExistingValues(wrapper: ResourceWrapper): Promise<Token[]> {
     .column('value')
     .where('resourceId', Operator.EQUALS, wrapper.id)
     .orderBy('index')
-    .execute(getClient())
+    .execute(client)
     .then((result) =>
       result.map((row) => ({
         code: row.code,
