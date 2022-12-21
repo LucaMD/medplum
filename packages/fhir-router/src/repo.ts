@@ -1,8 +1,40 @@
 import { badRequest, deepClone, matchesSearchRequest, notFound, SearchRequest } from '@medplum/core';
-import { Bundle, BundleEntry, Resource } from '@medplum/fhirtypes';
+import { Bundle, BundleEntry, Reference, Resource } from '@medplum/fhirtypes';
 import { applyPatch, JsonPatchError, Operation } from 'fast-json-patch';
 
-export class MemoryRepository {
+export interface FhirRepository {
+  // Server
+  createResource<T extends Resource>(resource: T): Promise<T>;
+
+  readResource<T extends Resource>(resourceType: string, id: string): Promise<T>;
+
+  readReference<T extends Resource>(reference: Reference<T>): Promise<T>;
+
+  /**
+   * Returns resource history.
+   *
+   * Results are sorted with oldest versions last
+   *
+   * See: https://www.hl7.org/fhir/http.html#history
+   *
+   * @param resourceType The FHIR resource type.
+   * @param id The FHIR resource ID.
+   * @returns Operation outcome and a history bundle.
+   */
+  readHistory<T extends Resource>(resourceType: string, id: string): Promise<Bundle<T>>;
+
+  readVersion<T extends Resource>(resourceType: string, id: string, vid: string): Promise<T>;
+
+  updateResource<T extends Resource>(resource: T): Promise<T>;
+
+  deleteResource(resourceType: string, id: string): Promise<void>;
+
+  patchResource(resourceType: string, id: string, patch: Operation[]): Promise<Resource>;
+
+  search<T extends Resource>(searchRequest: SearchRequest): Promise<Bundle<T>>;
+}
+
+export class MemoryRepository implements FhirRepository {
   readonly #resources: Record<string, Record<string, Resource>>;
   readonly #history: Record<string, Record<string, Resource[]>>;
 
@@ -11,7 +43,7 @@ export class MemoryRepository {
     this.#history = {};
   }
 
-  createResource<T extends Resource>(resource: T): T {
+  createResource<T extends Resource>(resource: T): Promise<T> {
     const result = deepClone(resource);
 
     if (!result.id) {
@@ -46,11 +78,11 @@ export class MemoryRepository {
 
     this.#resources[resourceType][id] = result;
     this.#history[resourceType][id].push(result);
-    return deepClone(result);
+    return Promise.resolve(deepClone(result));
   }
 
-  updateResource<T extends Resource>(resource: T): T {
-    const result = JSON.parse(JSON.stringify(resource)) as T;
+  updateResource<T extends Resource>(resource: T): Promise<T> {
+    const result = deepClone(resource);
     if (result.meta) {
       if (result.meta.versionId) {
         delete result.meta.versionId;
@@ -63,7 +95,7 @@ export class MemoryRepository {
   }
 
   async patchResource(resourceType: string, id: string, patch: Operation[]): Promise<Resource> {
-    const resource = this.readResource(resourceType, id);
+    const resource = await this.readResource(resourceType, id);
 
     let patchResult;
     try {
@@ -78,7 +110,7 @@ export class MemoryRepository {
     return this.updateResource(patchedResource);
   }
 
-  readResource<T extends Resource>(resourceType: string, id: string): T {
+  async readResource<T extends Resource>(resourceType: string, id: string): Promise<T> {
     const resource = this.#resources?.[resourceType]?.[id] as T | undefined;
     if (!resource) {
       throw notFound;
@@ -86,8 +118,16 @@ export class MemoryRepository {
     return deepClone(resource);
   }
 
-  readHistory<T extends Resource>(resourceType: string, id: string): Bundle<T> {
-    this.readResource(resourceType, id);
+  async readReference<T extends Resource>(reference: Reference<T>): Promise<T> {
+    const parts = reference.reference?.split('/');
+    if (!parts || parts.length !== 2) {
+      throw badRequest('Invalid reference');
+    }
+    return this.readResource(parts[0], parts[1]);
+  }
+
+  async readHistory<T extends Resource>(resourceType: string, id: string): Promise<Bundle<T>> {
+    await this.readResource(resourceType, id);
     return {
       resourceType: 'Bundle',
       type: 'history',
@@ -97,8 +137,8 @@ export class MemoryRepository {
     };
   }
 
-  readVersion<T extends Resource>(resourceType: string, id: string, versionId: string): T {
-    this.readResource(resourceType, id);
+  async readVersion<T extends Resource>(resourceType: string, id: string, versionId: string): Promise<T> {
+    await this.readResource(resourceType, id);
     const version = this.#history?.[resourceType]?.[id]?.find((v) => v.meta?.versionId === versionId) as T | undefined;
     if (!version) {
       throw notFound;
@@ -106,7 +146,7 @@ export class MemoryRepository {
     return deepClone(version);
   }
 
-  search<T extends Resource>(searchRequest: SearchRequest): Bundle<T> {
+  async search<T extends Resource>(searchRequest: SearchRequest): Promise<Bundle<T>> {
     const { resourceType } = searchRequest;
     const resources = this.#resources[resourceType] ?? {};
     const result = Object.values(resources).filter((resource) => matchesSearchRequest(resource, searchRequest));
@@ -118,10 +158,11 @@ export class MemoryRepository {
     };
   }
 
-  deleteResource(resourceType: string, id: string): void {
-    if (this.#resources?.[resourceType]?.[id]) {
-      delete this.#resources[resourceType][id];
+  async deleteResource(resourceType: string, id: string): Promise<void> {
+    if (!this.#resources?.[resourceType]?.[id]) {
+      throw notFound;
     }
+    delete this.#resources[resourceType][id];
   }
 
   private generateId(): string {

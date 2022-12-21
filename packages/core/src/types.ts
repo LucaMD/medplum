@@ -7,7 +7,7 @@ import {
   StructureDefinition,
 } from '@medplum/fhirtypes';
 import baseSchema from './base-schema.json';
-import { SearchParameterDetails } from './searchparams';
+import { SearchParameterDetails } from './search/details';
 import { capitalize } from './utils';
 
 export interface TypedValue {
@@ -346,6 +346,10 @@ export function getElementDefinition(typeName: string, propertyName: string): El
   }
 
   return property;
+}
+
+export function getResourceTypes(): string[] {
+  return Object.keys(globalSchema.types);
 }
 
 /**

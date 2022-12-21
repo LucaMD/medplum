@@ -1,9 +1,17 @@
-import { Operator } from '@medplum/core';
+import { readJson } from '@medplum/definitions';
+import { Bundle, SearchParameter } from '@medplum/fhirtypes';
 import { URL } from 'url';
-import { getSearchParameters } from '../structure';
+import { indexSearchParameterBundle, indexStructureDefinitionBundle } from '../types';
 import { parseSearchRequest, parseSearchUrl } from './parse';
+import { Operator } from './search';
 
 describe('FHIR Search Utils', () => {
+  beforeAll(() => {
+    indexStructureDefinitionBundle(readJson('fhir/r4/profiles-types.json') as Bundle);
+    indexStructureDefinitionBundle(readJson('fhir/r4/profiles-resources.json') as Bundle);
+    indexSearchParameterBundle(readJson('fhir/r4/search-parameters.json') as Bundle<SearchParameter>);
+  });
+
   test('Parse Patient search', () => {
     expect(parseSearchRequest('Patient', {})).toMatchObject({
       resourceType: 'Patient',
@@ -70,11 +78,6 @@ describe('FHIR Search Utils', () => {
       total: 'estimate',
       count: 0,
     });
-  });
-
-  test('Patient has birthdate param', () => {
-    const params = getSearchParameters('Patient');
-    expect(params?.['birthdate']).toBeDefined();
   });
 
   test('Parse URL', () => {

@@ -18,6 +18,7 @@ import {
   normalizeErrorString,
   notFound,
   Operator as FhirOperator,
+  parseSearchUrl,
   ProfileResource,
   resolveId,
   SearchParameterDetails,
@@ -76,7 +77,6 @@ import { getPatient } from './patient';
 import { validateReferences } from './references';
 import { rewriteAttachments, RewriteMode } from './rewrite';
 import { validateResource, validateResourceType } from './schema';
-import { parseSearchUrl } from './search';
 import { applySmartScopes } from './smart';
 import {
   Column,

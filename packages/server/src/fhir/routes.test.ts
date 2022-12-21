@@ -33,6 +33,7 @@ describe('FHIR Routes', () => {
           },
         ],
       });
+    console.log(JSON.stringify(res.body, null, 2));
     expect(res.status).toBe(201);
     testPatient = res.body as Patient;
     patientId = testPatient.id as string;
@@ -110,7 +111,7 @@ describe('FHIR Routes', () => {
     expect(res.status).toBe(400);
   });
 
-  test('Create resource', async () => {
+  test('Create resource success', async () => {
     const res = await request(app)
       .post(`/fhir/R4/Patient`)
       .set('Authorization', 'Bearer ' + accessToken)
@@ -443,14 +444,6 @@ describe('FHIR Routes', () => {
       .set('Authorization', 'Bearer ' + accessToken)
       .type('form');
     expect(res.status).toBe(200);
-  });
-
-  test('Search by POST wrong content-type', async () => {
-    const res = await request(app)
-      .post(`/fhir/R4/Patient/_search`)
-      .set('Authorization', 'Bearer ' + accessToken)
-      .type('application/json');
-    expect(res.status).toBe(400);
   });
 
   test('Validate create success', async () => {
