@@ -364,6 +364,13 @@ export class BackEnd extends Construct {
     });
 
     // SSM Parameters
+    const awsRegionParam = new ssm.StringParameter(this, 'AwsRegion', {
+      tier: ssm.ParameterTier.STANDARD,
+      parameterName: `/medplum/${name}/awsRegion`,
+      description: 'AWS Region',
+      stringValue: config.region,
+    });
+
     const databaseSecrets = new ssm.StringParameter(this, 'DatabaseSecretsParameter', {
       tier: ssm.ParameterTier.STANDARD,
       parameterName: `/medplum/${name}/DatabaseSecrets`,
@@ -387,6 +394,7 @@ export class BackEnd extends Construct {
 
     // Debug
     console.log('ARecord', record.domainName);
+    console.log('AwsRegion', awsRegionParam.stringValue);
     console.log('DatabaseSecretsParameter', databaseSecrets.parameterArn);
     console.log('RedisSecretsParameter', redisSecretsParameter.parameterArn);
     console.log('RedisCluster', redisCluster.attrPrimaryEndPointAddress);

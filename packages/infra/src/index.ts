@@ -37,6 +37,12 @@ export function main(context?: Record<string, string>): void {
 
   const config = JSON.parse(readFileSync(resolve(configFileName), 'utf-8')) as MedplumInfraConfig;
 
+  // Add defaults
+
+  // Create HTTPS certificates if not provided
+
+  // Create CloudFront signing key pair if not provided
+
   const stack = new MedplumStack(app, config);
 
   console.log('Stack', stack.stackId);
