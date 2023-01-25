@@ -355,32 +355,6 @@ describe('MockClient', () => {
     expect(resource2.resourceType).toEqual('Bundle');
   });
 
-  test('Read Homer Simpson history', async () => {
-    const client = new MockClient();
-    // const bundle = await client.readHistory('Patient', HomerSimpson.id as string);
-    // expect(bundle.entry).toHaveLength(2);
-
-    const result = await client.executeBatch({
-      resourceType: 'Bundle',
-      type: 'batch',
-      entry: [
-        {
-          request: {
-            method: 'GET',
-            url: 'Patient/123/_history',
-          },
-        },
-      ],
-    });
-    console.log('result', JSON.stringify(result, null, 2));
-
-    // const resource1 = await client.createResource<Patient>({ resourceType: 'Patient' });
-    // expect(resource1).toBeDefined();
-    // const resource2 = await client.readHistory('Patient', resource1.id as string);
-    // expect(resource2).toBeDefined();
-    // expect(resource2.resourceType).toEqual('Bundle');
-  });
-
   test('Read history not found', async () => {
     const client = new MockClient();
     try {

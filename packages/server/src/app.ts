@@ -100,7 +100,6 @@ function errorHandler(err: any, req: Request, res: Response, next: NextFunction)
     sendOutcome(res, badRequest('File too large'));
     return;
   }
-  console.log(err);
   logger.error('Unhandled error', err);
   res.status(500).json({ msg: 'Internal Server Error' });
 }

@@ -59,24 +59,8 @@ describe('Batch', () => {
   });
 
   test('Process batch success', async () => {
-    // const authorId = randomUUID();
-    // const projectId = randomUUID();
     const patientId = randomUUID();
     const observationId = randomUUID();
-
-    // Be sure to act as a user without 'write meta' permissions.
-    // Need to verify that normal users can link urn:uuid requests.
-    // const repo = new MemoryRepository();
-    // const repo = new Repository({
-    //   author: {
-    //     reference: 'Practitioner/' + authorId,
-    //   },
-    //   project: projectId,
-    //   accessPolicy: {
-    //     resourceType: 'AccessPolicy',
-    //     resource: [{ resourceType: 'Patient' }, { resourceType: 'Observation' }],
-    //   },
-    // });
 
     const bundle = await processBatch(router, repo, {
       resourceType: 'Bundle',
@@ -228,29 +212,29 @@ describe('Batch', () => {
     expect(results[0].response?.status).toEqual('400');
   });
 
-  // test('Process batch create missing required properties', async () => {
-  //   const bundle = await processBatch(router, repo, {
-  //     resourceType: 'Bundle',
-  //     type: 'batch',
-  //     entry: [
-  //       {
-  //         request: {
-  //           method: 'POST',
-  //           url: 'Observation',
-  //         },
-  //         resource: {
-  //           resourceType: 'Observation',
-  //         },
-  //       },
-  //     ],
-  //   });
-  //   expect(bundle).toBeDefined();
-  //   expect(bundle?.entry).toBeDefined();
+  test.skip('Process batch create missing required properties', async () => {
+    const bundle = await processBatch(router, repo, {
+      resourceType: 'Bundle',
+      type: 'batch',
+      entry: [
+        {
+          request: {
+            method: 'POST',
+            url: 'Observation',
+          },
+          resource: {
+            resourceType: 'Observation',
+          },
+        },
+      ],
+    });
+    expect(bundle).toBeDefined();
+    expect(bundle?.entry).toBeDefined();
 
-  //   const results = bundle?.entry as BundleEntry[];
-  //   expect(results.length).toEqual(1);
-  //   expect(results[0].response?.status).toEqual('400');
-  // });
+    const results = bundle?.entry as BundleEntry[];
+    expect(results.length).toEqual(1);
+    expect(results[0].response?.status).toEqual('400');
+  });
 
   test('Process batch create ignore http fullUrl', async () => {
     const bundle = await processBatch(router, repo, {
@@ -368,32 +352,32 @@ describe('Batch', () => {
     expect(results[1].response?.location).toEqual(results[0].response?.location);
   });
 
-  // test('Process batch create ifNoneExist invalid resource type', async () => {
-  //   const identifier = randomUUID();
+  test.skip('Process batch create ifNoneExist invalid resource type', async () => {
+    const identifier = randomUUID();
 
-  //   const bundle = await processBatch(router, repo, {
-  //     resourceType: 'Bundle',
-  //     type: 'batch',
-  //     entry: [
-  //       {
-  //         request: {
-  //           method: 'POST',
-  //           url: 'XXX',
-  //           ifNoneExist: 'identifier=' + identifier,
-  //         },
-  //         resource: {
-  //           resourceType: 'XXX',
-  //         } as any,
-  //       },
-  //     ],
-  //   });
-  //   expect(bundle).toBeDefined();
-  //   expect(bundle?.entry).toBeDefined();
+    const bundle = await processBatch(router, repo, {
+      resourceType: 'Bundle',
+      type: 'batch',
+      entry: [
+        {
+          request: {
+            method: 'POST',
+            url: 'XXX',
+            ifNoneExist: 'identifier=' + identifier,
+          },
+          resource: {
+            resourceType: 'XXX',
+          } as any,
+        },
+      ],
+    });
+    expect(bundle).toBeDefined();
+    expect(bundle?.entry).toBeDefined();
 
-  //   const results = bundle?.entry as BundleEntry[];
-  //   expect(results.length).toEqual(1);
-  //   expect(results[0].response?.status).toEqual('400');
-  // });
+    const results = bundle?.entry as BundleEntry[];
+    expect(results.length).toEqual(1);
+    expect(results[0].response?.status).toEqual('400');
+  });
 
   test('Process batch create ifNoneExist multiple matches', async () => {
     const identifier = randomUUID();

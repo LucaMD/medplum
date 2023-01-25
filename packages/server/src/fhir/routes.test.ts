@@ -33,7 +33,6 @@ describe('FHIR Routes', () => {
           },
         ],
       });
-    console.log(JSON.stringify(res.body, null, 2));
     expect(res.status).toBe(201);
     testPatient = res.body as Patient;
     patientId = testPatient.id as string;
