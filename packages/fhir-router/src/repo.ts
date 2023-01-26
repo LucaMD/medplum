@@ -3,11 +3,35 @@ import { Bundle, BundleEntry, Reference, Resource } from '@medplum/fhirtypes';
 import { applyPatch, JsonPatchError, Operation } from 'fast-json-patch';
 
 export interface FhirRepository {
-  // Server
+  /**
+   * Creates a FHIR resource.
+   *
+   * See: https://www.hl7.org/fhir/http.html#create
+   *
+   * @param resource The FHIR resource to create.
+   * @returns The created resource.
+   */
   createResource<T extends Resource>(resource: T): Promise<T>;
 
+  /**
+   * Reads a FHIR resource by ID.
+   *
+   * See: https://www.hl7.org/fhir/http.html#read
+   *
+   * @param resourceType The FHIR resource type.
+   * @param id The FHIR resource ID.
+   * @returns The FHIR resource.
+   */
   readResource<T extends Resource>(resourceType: string, id: string): Promise<T>;
 
+  /**
+   * Reads a FHIR resource by reference.
+   *
+   * See: https://www.hl7.org/fhir/http.html#read
+   *
+   * @param reference The FHIR reference.
+   * @returns The FHIR resource.
+   */
   readReference<T extends Resource>(reference: Reference<T>): Promise<T>;
 
   /**
@@ -23,14 +47,57 @@ export interface FhirRepository {
    */
   readHistory<T extends Resource>(resourceType: string, id: string): Promise<Bundle<T>>;
 
+  /**
+   * Reads a FHIR resource version.
+   *
+   * See: https://www.hl7.org/fhir/http.html#vread
+   *
+   * @param resourceType The FHIR resource type.
+   * @param id The FHIR resource ID.
+   * @param vid The FHIR resource version ID.
+   */
   readVersion<T extends Resource>(resourceType: string, id: string, vid: string): Promise<T>;
 
+  /**
+   * Updates a FHIR resource.
+   *
+   * See: https://www.hl7.org/fhir/http.html#update
+   *
+   * @param resource The FHIR resource to update.
+   * @returns The updated resource.
+   */
   updateResource<T extends Resource>(resource: T): Promise<T>;
 
+  /**
+   * Deletes a FHIR resource.
+   *
+   * See: https://www.hl7.org/fhir/http.html#delete
+   *
+   * @param resourceType The FHIR resource type.
+   * @param id The FHIR resource ID.
+   */
   deleteResource(resourceType: string, id: string): Promise<void>;
 
+  /**
+   * Patches a FHIR resource.
+   *
+   * See: https://www.hl7.org/fhir/http.html#patch
+   *
+   * @param resourceType The FHIR resource type.
+   * @param id The FHIR resource ID.
+   * @param patch The JSONPatch operations.
+   * @returns The patched resource.
+   */
   patchResource(resourceType: string, id: string, patch: Operation[]): Promise<Resource>;
 
+  /**
+   * Searches for FHIR resources.
+   *
+   * See: https://www.hl7.org/fhir/http.html#search
+   *
+   * @param searchRequest The FHIR search request.
+   * @returns The search results.
+   */
   search<T extends Resource>(searchRequest: SearchRequest): Promise<Bundle<T>>;
 }
 

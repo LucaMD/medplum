@@ -348,10 +348,6 @@ export function getElementDefinition(typeName: string, propertyName: string): El
   return property;
 }
 
-export function getResourceTypes(): string[] {
-  return Object.keys(globalSchema.types);
-}
-
 /**
  * Global schema singleton.
  */
