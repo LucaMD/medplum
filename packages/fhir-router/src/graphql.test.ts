@@ -1,6 +1,8 @@
 import {
   allOk,
+  badRequest,
   createReference,
+  forbidden,
   getReferenceString,
   indexSearchParameterBundle,
   indexStructureDefinitionBundle,
@@ -79,6 +81,58 @@ describe('GraphQL', () => {
         reference: 'Patient/' + randomUUID(),
       },
     });
+  });
+
+  test('Missing query', async () => {
+    const [outcome] = await graphqlHandler(
+      {
+        method: 'POST',
+        url: '/fhir/R4/$graphql',
+        query: {},
+        params: {},
+        body: {},
+      },
+      repo
+    );
+    expect(outcome).toMatchObject(badRequest('Must provide query.'));
+  });
+
+  test('Syntax error', async () => {
+    const [outcome] = await graphqlHandler(
+      {
+        method: 'POST',
+        url: '/fhir/R4/$graphql',
+        query: {},
+        params: {},
+        body: {
+          query: 'This is not valid GraphQL.',
+        },
+      },
+      repo
+    );
+    expect(outcome).toMatchObject(badRequest('GraphQL syntax error.'));
+  });
+
+  test('Introspection forbidden', async () => {
+    // https://graphql.org/learn/introspection/
+    const [outcome] = await graphqlHandler(
+      {
+        method: 'POST',
+        url: '/fhir/R4/$graphql',
+        query: {},
+        params: {},
+        body: {
+          query: `{
+            __type(name: "Patient") {
+              name
+              kind
+            }
+          }`,
+        },
+      },
+      repo
+    );
+    expect(outcome).toMatchObject(forbidden);
   });
 
   test('Read by ID', async () => {
