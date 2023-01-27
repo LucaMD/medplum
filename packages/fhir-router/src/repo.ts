@@ -154,10 +154,6 @@ export class MemoryRepository implements FhirRepository {
 
     this.#resources[resourceType][id] = result;
     this.#history[resourceType][id].push(result);
-
-    // Sleep one millisecond to ensure that the last updated time is different
-    await sleep(10);
-
     return deepClone(result);
   }
 
@@ -282,9 +278,3 @@ const generateId = (): string =>
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
-
-/**
- * Sleeps for the specified number of milliseconds.
- * @param ms The number of milliseconds to sleep.
- */
-const sleep = async (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
