@@ -1,33 +1,102 @@
-import { allOk, createReference, indexSearchParameterBundle, indexStructureDefinitionBundle } from '@medplum/core';
+import {
+  allOk,
+  createReference,
+  getReferenceString,
+  indexSearchParameterBundle,
+  indexStructureDefinitionBundle,
+} from '@medplum/core';
 import { readJson } from '@medplum/definitions';
-import { Bundle, Encounter, Patient, SearchParameter } from '@medplum/fhirtypes';
+import { Binary, Bundle, Encounter, Patient, SearchParameter, ServiceRequest } from '@medplum/fhirtypes';
+import { randomUUID } from 'crypto';
 import { FhirRequest } from './fhirrouter';
 import { getRootSchema, graphqlHandler } from './graphql';
 import { MemoryRepository } from './repo';
 
+const repo = new MemoryRepository();
+let binary: Binary;
+let patient: Patient;
+let serviceRequest: ServiceRequest;
+let encounter1: Encounter;
+let encounter2: Encounter;
+
 describe('GraphQL', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-types.json') as Bundle);
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-resources.json') as Bundle);
     indexSearchParameterBundle(readJson('fhir/r4/search-parameters.json') as Bundle<SearchParameter>);
     getRootSchema();
+
+    // Create a profile picture
+    binary = await repo.createResource<Binary>({ resourceType: 'Binary' });
+
+    // Creat a simple patient
+    patient = await repo.createResource<Patient>({
+      resourceType: 'Patient',
+      name: [
+        {
+          given: ['Alice'],
+          family: 'Smith',
+        },
+      ],
+      photo: [
+        {
+          contentType: 'image/jpeg',
+          url: getReferenceString(binary),
+        },
+      ],
+    });
+
+    // Create a service request
+    serviceRequest = await repo.createResource<ServiceRequest>({
+      resourceType: 'ServiceRequest',
+      status: 'active',
+      intent: 'order',
+      code: {
+        text: 'Chest CT',
+      },
+      subject: createReference(patient),
+    });
+
+    // Create an encounter referring to the patient
+    encounter1 = await repo.createResource<Encounter>({
+      resourceType: 'Encounter',
+      status: 'in-progress',
+      class: {
+        code: 'HH',
+      },
+      subject: createReference(patient),
+      basedOn: [createReference(serviceRequest)],
+    });
+
+    // Create an encounter referring to missing patient
+    encounter2 = await repo.createResource<Encounter>({
+      resourceType: 'Encounter',
+      status: 'in-progress',
+      class: {
+        code: 'HH',
+      },
+      subject: {
+        reference: 'Patient/' + randomUUID(),
+      },
+    });
   });
 
   test('Read by ID', async () => {
-    const repo = new MemoryRepository();
-
-    const patient = await repo.createResource<Patient>({
-      resourceType: 'Patient',
-      name: [{ given: ['John'], family: 'Doe' }],
-    });
-
     const request: FhirRequest = {
       method: 'POST',
       url: '/fhir/R4/$graphql',
       query: {},
       params: {},
       body: {
-        query: `{ Patient(id: "${patient.id}") { resourceType id meta { versionId lastUpdated } name { given family } } }`,
+        query: `
+      {
+        Patient(id: "${patient.id}") {
+          id
+          name { given }
+          photo { url }
+        }
+      }
+    `,
       },
     };
 
@@ -37,166 +106,200 @@ describe('GraphQL', () => {
     expect(result[0]).toMatchObject(allOk);
 
     const data = (result?.[1] as any).data;
-    expect(data).toMatchObject({ Patient: patient });
+    expect(data.Patient).toBeDefined();
+    expect(data.Patient.id).toEqual(patient.id);
+    expect(data.Patient.photo[0].url).toBeDefined();
   });
 
-  // test('Read by ID not found', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       Patient(id: "${randomUUID()}") {
-  //         id
-  //         name { given }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.Patient).toBeNull();
-  //   expect(res.body.errors[0].message).toEqual('Not found');
-  // });
+  test('Read by ID not found', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        Patient(id: "${randomUUID()}") {
+          id
+          name { given }
+        }
+      }
+    `,
+      },
+    };
 
-  // test('Search', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       PatientList(name: "Smith") {
-  //         id
-  //         name { given }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.PatientList).toBeDefined();
-  // });
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
 
-  // test('Search with _id', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       PatientList(_id: "${patient.id}") {
-  //         id
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.PatientList).toBeDefined();
-  //   expect(res.body.data.PatientList.length).toBe(1);
-  // });
+    const data = (res?.[1] as any).data;
+    expect(data.Patient).toBeNull();
 
-  // test('Search with _count', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       EncounterList(_count: 1) {
-  //         id
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.EncounterList).toBeDefined();
-  //   expect(res.body.data.EncounterList.length).toBe(1);
-  // });
+    const errors = (res?.[1] as any).errors;
+    expect(errors[0].message).toEqual('Not found');
+  });
 
-  // test('Search with based-on', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       EncounterList(based_on: "${getReferenceString(serviceRequest)}") {
-  //         id
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.EncounterList).toBeDefined();
-  //   expect(res.body.data.EncounterList.length).toBe(1);
-  // });
+  test('Search', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        PatientList(name: "Smith") {
+          id
+          name { given }
+        }
+      }
+    `,
+      },
+    };
 
-  // test('Sort by _lastUpdated asc', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       EncounterList(_sort: "_lastUpdated") {
-  //         id
-  //         meta { lastUpdated }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.EncounterList).toBeDefined();
-  //   expect(res.body.data.EncounterList.length >= 2).toBe(true);
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
 
-  //   const e1 = res.body.data.EncounterList[0];
-  //   const e2 = res.body.data.EncounterList[1];
-  //   expect(e1.meta.lastUpdated.localeCompare(e2.meta.lastUpdated)).toBeLessThanOrEqual(0);
-  // });
+    const data = (res?.[1] as any).data;
+    expect(data.PatientList).toBeDefined();
+  });
 
-  // test('Sort by _lastUpdated desc', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       EncounterList(_sort: "-_lastUpdated") {
-  //         id
-  //         meta { lastUpdated }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.EncounterList).toBeDefined();
-  //   expect(res.body.data.EncounterList.length >= 2).toBe(true);
+  test('Search with _id', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        PatientList(_id: "${patient.id}") {
+          id
+        }
+      }
+    `,
+      },
+    };
 
-  //   const e1 = res.body.data.EncounterList[0];
-  //   const e2 = res.body.data.EncounterList[1];
-  //   expect(e1.meta.lastUpdated.localeCompare(e2.meta.lastUpdated)).toBeGreaterThanOrEqual(0);
-  // });
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
+
+    const data = (res?.[1] as any).data;
+    expect(data.PatientList).toBeDefined();
+    expect(data.PatientList.length).toBe(1);
+  });
+
+  test('Search with _count', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        EncounterList(_count: 1) {
+          id
+        }
+      }
+    `,
+      },
+    };
+
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
+
+    const data = (res?.[1] as any).data;
+    expect(data.EncounterList).toBeDefined();
+    expect(data.EncounterList.length).toBe(1);
+  });
+
+  test('Search with based-on', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        EncounterList(based_on: "${getReferenceString(serviceRequest)}") {
+          id
+        }
+      }
+    `,
+      },
+    };
+
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
+
+    const data = (res?.[1] as any).data;
+    expect(data.EncounterList).toBeDefined();
+    expect(data.EncounterList.length).toBe(1);
+  });
+
+  test('Sort by _lastUpdated asc', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        EncounterList(_sort: "_lastUpdated") {
+          id
+          meta { lastUpdated }
+        }
+      }
+    `,
+      },
+    };
+
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
+
+    const data = (res?.[1] as any).data;
+    expect(data.EncounterList).toBeDefined();
+    expect(data.EncounterList.length >= 2).toBe(true);
+
+    const e1 = data.EncounterList[0];
+    const e2 = data.EncounterList[1];
+    expect(e1.meta.lastUpdated.localeCompare(e2.meta.lastUpdated)).toBeLessThanOrEqual(0);
+  });
+
+  test('Sort by _lastUpdated desc', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        EncounterList(_sort: "-_lastUpdated") {
+          id
+          meta { lastUpdated }
+        }
+      }
+    `,
+      },
+    };
+
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
+
+    const data = (res?.[1] as any).data;
+    expect(data.EncounterList).toBeDefined();
+    expect(data.EncounterList.length >= 2).toBe(true);
+
+    const e1 = data.EncounterList[0];
+    const e2 = data.EncounterList[1];
+    expect(e1.meta.lastUpdated.localeCompare(e2.meta.lastUpdated)).toBeGreaterThanOrEqual(0);
+  });
 
   test('Read resource by reference', async () => {
-    const repo = new MemoryRepository();
-
-    const patient = await repo.createResource<Patient>({
-      resourceType: 'Patient',
-      name: [{ given: ['John'], family: 'Doe' }],
-    });
-
-    const encounter = await repo.createResource<Encounter>({
-      resourceType: 'Encounter',
-      subject: createReference(patient),
-    });
-
     const request: FhirRequest = {
       method: 'POST',
       url: '/fhir/R4/$graphql',
@@ -205,7 +308,7 @@ describe('GraphQL', () => {
       body: {
         query: `
         {
-          Encounter(id: "${encounter.id}") {
+          Encounter(id: "${encounter1.id}") {
             id
             meta {
               lastUpdated
@@ -234,167 +337,189 @@ describe('GraphQL', () => {
     expect(result[0]).toMatchObject(allOk);
 
     const data = (result?.[1] as any).data;
-    expect(data.Encounter.id).toEqual(encounter.id);
+    expect(data.Encounter.id).toEqual(encounter1.id);
     expect(data.Encounter.subject.resource).toBeDefined();
     expect(data.Encounter.subject.resource.id).toEqual(patient.id);
-    expect(data.Encounter.subject.resource.name[0].given[0]).toEqual('John');
+    expect(data.Encounter.subject.resource.name[0].given[0]).toEqual('Alice');
   });
 
-  // test('Read resource by reference not found', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //       {
-  //         Encounter(id: "${encounter2.id}") {
-  //           id
-  //           meta {
-  //             lastUpdated
-  //           }
-  //           subject {
-  //             id
-  //             reference
-  //             resource {
-  //               __typename
-  //               ... on Patient {
-  //                 name {
-  //                   given
-  //                   family
-  //                 }
-  //               }
-  //             }
-  //           }
-  //         }
-  //       }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.Encounter).toBeDefined();
-  //   expect(res.body.data.Encounter.subject.resource).toBeNull();
-  // });
+  test('Read resource by reference not found', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+        {
+          Encounter(id: "${encounter2.id}") {
+            id
+            meta {
+              lastUpdated
+            }
+            subject {
+              id
+              reference
+              resource {
+                ... on Patient {
+                  name {
+                    given
+                    family
+                  }
+                }
+              }
+            }
+          }
+        }
+    `,
+      },
+    };
 
-  // test('Reverse lookup with _reference', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       PatientList(_count: 1) {
-  //         id
-  //         ObservationList(_reference: subject) {
-  //           id
-  //           status
-  //           code {
-  //             text
-  //           }
-  //         }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(200);
-  //   expect(res.body.data.PatientList).toBeDefined();
-  //   expect(res.body.data.PatientList[0].ObservationList).toBeDefined();
-  // });
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
 
-  // test('Reverse lookup without _reference', async () => {
-  //   const res = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //     {
-  //       PatientList(_count: 1) {
-  //         id
-  //         ObservationList(subject: "xyz") {
-  //           id
-  //           status
-  //           code {
-  //             text
-  //           }
-  //         }
-  //       }
-  //     }
-  //   `,
-  //     });
-  //   expect(res.status).toBe(400);
-  // });
+    const data = (res?.[1] as any).data;
+    expect(data.Encounter).toBeDefined();
+    expect(data.Encounter.subject.resource).toBeNull();
+  });
 
-  // test('Max depth', async () => {
-  //   // The definition of "depth" is a little abstract in GraphQL
-  //   // We use "selection", which, in a well formatted query, is the level of indentation
+  test('Reverse lookup with _reference', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        PatientList(_count: 1) {
+          id
+          ObservationList(_reference: subject) {
+            id
+            status
+            code {
+              text
+            }
+          }
+        }
+      }
+    `,
+      },
+    };
 
-  //   // 8 levels of depth is ok
-  //   const res1 = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //       {
-  //         ServiceRequestList {
-  //           id
-  //           basedOn {
-  //             resource {
-  //               ...on ServiceRequest {
-  //                 id
-  //                 basedOn {
-  //                   resource {
-  //                     ...on ServiceRequest {
-  //                       id
-  //                     }
-  //                   }
-  //                 }
-  //               }
-  //             }
-  //           }
-  //         }
-  //       }
-  //   `,
-  //     });
-  //   expect(res1.status).toBe(200);
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]).toMatchObject(allOk);
 
-  //   // 10 levels of nesting is too much
-  //   const res2 = await request(app)
-  //     .post('/fhir/R4/$graphql')
-  //     .set('Authorization', 'Bearer ' + accessToken)
-  //     .set('Content-Type', 'application/json')
-  //     .send({
-  //       query: `
-  //       {
-  //         ServiceRequestList {
-  //           id
-  //           basedOn {
-  //             resource {
-  //               ...on ServiceRequest {
-  //                 id
-  //                 basedOn {
-  //                   resource {
-  //                     ...on ServiceRequest {
-  //                       id
-  //                       basedOn {
-  //                         resource {
-  //                           ...on ServiceRequest {
-  //                             id
-  //                           }
-  //                         }
-  //                       }
-  //                     }
-  //                   }
-  //                 }
-  //               }
-  //             }
-  //           }
-  //         }
-  //       }
-  //   `,
-  //     });
-  //   expect(res2.status).toBe(400);
-  //   expect(res2.body.issue[0].details.text).toEqual('Field "resource" exceeds max depth (depth=9, max=8)');
-  // });
+    const data = (res?.[1] as any).data;
+    expect(data.PatientList).toBeDefined();
+    expect(data.PatientList[0].ObservationList).toBeDefined();
+  });
+
+  test('Reverse lookup without _reference', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+      {
+        PatientList(_count: 1) {
+          id
+          ObservationList(subject: "xyz") {
+            id
+            status
+            code {
+              text
+            }
+          }
+        }
+      }
+    `,
+      },
+    };
+    const res = await graphqlHandler(request, repo);
+    expect(res[0]?.issue?.[0]?.details?.text).toEqual(
+      'Field "ObservationList" argument "_reference" of type "Patient_Observation_reference!" is required, but it was not provided.'
+    );
+  });
+
+  test('Max depth', async () => {
+    // The definition of "depth" is a little abstract in GraphQL
+    // We use "selection", which, in a well formatted query, is the level of indentation
+
+    // 8 levels of depth is ok
+    const request1: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+        {
+          ServiceRequestList {
+            id
+            basedOn {
+              resource {
+                ...on ServiceRequest {
+                  id
+                  basedOn {
+                    resource {
+                      ...on ServiceRequest {
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    `,
+      },
+    };
+
+    const res1 = await graphqlHandler(request1, repo);
+    expect(res1[0]).toMatchObject(allOk);
+
+    // 10 levels of nesting is too much
+    const request2: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `
+        {
+          ServiceRequestList {
+            id
+            basedOn {
+              resource {
+                ...on ServiceRequest {
+                  id
+                  basedOn {
+                    resource {
+                      ...on ServiceRequest {
+                        id
+                        basedOn {
+                          resource {
+                            ...on ServiceRequest {
+                              id
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    `,
+      },
+    };
+    const res2 = await graphqlHandler(request2, repo);
+    expect(res2[0]?.issue?.[0]?.details?.text).toEqual('Field "resource" exceeds max depth (depth=9, max=8)');
+  });
 });

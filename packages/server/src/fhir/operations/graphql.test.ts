@@ -82,7 +82,7 @@ describe('GraphQL', () => {
       .set('Content-Type', 'application/fhir+json')
       .send({
         resourceType: 'Encounter',
-        status: 'active',
+        status: 'in-progress',
         class: {
           code: 'HH',
         },
@@ -99,7 +99,7 @@ describe('GraphQL', () => {
       .set('Content-Type', 'application/fhir+json')
       .send({
         resourceType: 'Encounter',
-        status: 'active',
+        status: 'in-progress',
         class: {
           code: 'HH',
         },

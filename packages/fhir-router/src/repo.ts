@@ -1,4 +1,13 @@
-import { badRequest, deepClone, matchesSearchRequest, notFound, SearchRequest } from '@medplum/core';
+import {
+  badRequest,
+  deepClone,
+  evalFhirPath,
+  globalSchema,
+  matchesSearchRequest,
+  notFound,
+  SearchRequest,
+  SortRule,
+} from '@medplum/core';
 import { Bundle, BundleEntry, Reference, Resource } from '@medplum/fhirtypes';
 import { applyPatch, JsonPatchError, Operation } from 'fast-json-patch';
 
@@ -110,11 +119,11 @@ export class MemoryRepository implements FhirRepository {
     this.#history = {};
   }
 
-  createResource<T extends Resource>(resource: T): Promise<T> {
+  async createResource<T extends Resource>(resource: T): Promise<T> {
     const result = deepClone(resource);
 
     if (!result.id) {
-      result.id = this.generateId();
+      result.id = generateId();
     }
 
     if (!result.meta) {
@@ -122,7 +131,7 @@ export class MemoryRepository implements FhirRepository {
     }
 
     if (!result.meta?.versionId) {
-      result.meta.versionId = this.generateId();
+      result.meta.versionId = generateId();
     }
 
     if (!result.meta?.lastUpdated) {
@@ -145,7 +154,11 @@ export class MemoryRepository implements FhirRepository {
 
     this.#resources[resourceType][id] = result;
     this.#history[resourceType][id].push(result);
-    return Promise.resolve(deepClone(result));
+
+    // Sleep one millisecond to ensure that the last updated time is different
+    await sleep(10);
+
+    return deepClone(result);
   }
 
   updateResource<T extends Resource>(resource: T): Promise<T> {
@@ -217,10 +230,22 @@ export class MemoryRepository implements FhirRepository {
     const { resourceType } = searchRequest;
     const resources = this.#resources[resourceType] ?? {};
     const result = Object.values(resources).filter((resource) => matchesSearchRequest(resource, searchRequest));
+    let entry = result.map((resource) => ({ resource: deepClone(resource) })) as BundleEntry<T>[];
+    if (searchRequest.sortRules) {
+      for (const sortRule of searchRequest.sortRules) {
+        entry = entry.sort((a, b) => sortComparator(a.resource as T, b.resource as T, sortRule));
+      }
+    }
+    if (searchRequest.offset !== undefined) {
+      entry = entry.slice(searchRequest.offset);
+    }
+    if (searchRequest.count !== undefined) {
+      entry = entry.slice(0, searchRequest.count);
+    }
     return {
       resourceType: 'Bundle',
       type: 'searchset',
-      entry: result.map((resource) => ({ resource: deepClone(resource) })) as BundleEntry<T>[],
+      entry,
       total: result.length,
     };
   }
@@ -231,16 +256,35 @@ export class MemoryRepository implements FhirRepository {
     }
     delete this.#resources[resourceType][id];
   }
-
-  private generateId(): string {
-    // Cross platform random UUID generator
-    // Note that this is not intended for production use, but rather for testing
-    // This should be replaced when crypto.randomUUID is fully supported
-    // https://stackoverflow.com/revisions/2117523/28
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
 }
+
+const sortComparator = <T extends Resource>(a: T, b: T, sortRule: SortRule): number => {
+  const searchParam = globalSchema.types[a.resourceType]?.searchParams?.[sortRule.code];
+  const expression = searchParam?.expression;
+  if (!expression) {
+    return 0;
+  }
+  const aStr = JSON.stringify(evalFhirPath(expression, a));
+  const bStr = JSON.stringify(evalFhirPath(expression, b));
+  return aStr.localeCompare(bStr) * (sortRule.descending ? -1 : 1);
+};
+
+/**
+ * Cross platform random UUID generator
+ * Note that this is not intended for production use, but rather for testing
+ * This should be replaced when crypto.randomUUID is fully supported
+ * See: https://stackoverflow.com/revisions/2117523/28
+ * @returns A random UUID.
+ */
+const generateId = (): string =>
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+
+/**
+ * Sleeps for the specified number of milliseconds.
+ * @param ms The number of milliseconds to sleep.
+ */
+const sleep = async (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
