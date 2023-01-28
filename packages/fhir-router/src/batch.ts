@@ -1,7 +1,8 @@
 import { allOk, badRequest, getReferenceString, getStatus, isOk, parseSearchUrl } from '@medplum/core';
-import { Bundle, BundleEntry, OperationOutcome, Resource } from '@medplum/fhirtypes';
-import { FhirRequest, FhirRouter } from './fhirrouter';
+import { Bundle, BundleEntry, BundleEntryRequest, OperationOutcome, Resource } from '@medplum/fhirtypes';
+import { FhirRouter } from './fhirrouter';
 import { FhirRepository } from './repo';
+import { HttpMethod } from './urlrouter';
 
 /**
  * Processes a FHIR batch request.
@@ -82,21 +83,13 @@ class BatchProcessor {
    * @returns The bundle entry response.
    */
   async #processBatchEntry(entry: BundleEntry): Promise<BundleEntry> {
-    if (!entry.request) {
-      return buildBundleResponse(badRequest('Missing entry.request'));
-    }
+    this.#validateEntry(entry);
 
-    if (!entry.request.method) {
-      return buildBundleResponse(badRequest('Missing entry.request.method'));
-    }
+    const request = entry.request as BundleEntryRequest;
 
-    if (!entry.request.url) {
-      return buildBundleResponse(badRequest('Missing entry.request.url'));
-    }
-
-    if (entry.resource?.resourceType && entry.request?.ifNoneExist) {
+    if (entry.resource?.resourceType && request.ifNoneExist) {
       const baseUrl = `https://example.com/${entry.resource.resourceType}`;
-      const searchUrl = new URL('?' + entry.request.ifNoneExist, baseUrl);
+      const searchUrl = new URL('?' + request.ifNoneExist, baseUrl);
       const searchBundle = await this.repo.search(parseSearchUrl(searchUrl));
       const entries = searchBundle?.entry as BundleEntry[];
       if (entries.length > 1) {
@@ -107,40 +100,62 @@ class BatchProcessor {
       }
     }
 
-    // Pass in dummy host for parsing purposes.
-    // The host is ignored.
-    const url = new URL(entry.request.url, 'https://example.com/');
     let body = entry.resource;
-
-    if (entry.request.method === 'PATCH') {
-      const patchResource = entry.resource;
-      if (!patchResource) {
-        return buildBundleResponse(badRequest('Missing entry.resource'));
-      }
-      if (patchResource.resourceType !== 'Binary') {
-        return buildBundleResponse(badRequest('Patch resource must be a Binary'));
-      }
-      if (!patchResource.data) {
-        return buildBundleResponse(badRequest('Missing entry.resource.data'));
-      }
-      body = JSON.parse(Buffer.from(patchResource.data, 'base64').toString('utf8'));
+    if (request.method === 'PATCH') {
+      body = this.#parsePatchBody(entry);
     }
 
-    const request: FhirRequest = {
-      method: entry.request.method,
-      url: url.pathname,
-      params: Object.create(null),
-      query: Object.fromEntries(url.searchParams),
-      body,
-    };
+    // Pass in dummy host for parsing purposes.
+    // The host is ignored.
+    const url = new URL(request.url as string, 'https://example.com/');
 
-    const result = await this.router.handleRequest(request, this.repo);
+    const result = await this.router.handleRequest(
+      {
+        method: request.method as HttpMethod,
+        url: url.pathname,
+        params: Object.create(null),
+        query: Object.fromEntries(url.searchParams),
+        body,
+      },
+      this.repo
+    );
 
     if (entry.fullUrl && result.length === 2) {
       this.#addReplacementId(entry.fullUrl, result[1]);
     }
 
     return buildBundleResponse(result[0], result[1]);
+  }
+
+  #validateEntry(entry: BundleEntry): void {
+    if (!entry.request) {
+      throw badRequest('Missing entry.request');
+    }
+
+    if (!entry.request.method) {
+      throw badRequest('Missing entry.request.method');
+    }
+
+    if (!entry.request.url) {
+      throw badRequest('Missing entry.request.url');
+    }
+  }
+
+  #parsePatchBody(entry: BundleEntry): any {
+    const patchResource = entry.resource;
+    if (!patchResource) {
+      throw badRequest('Missing entry.resource');
+    }
+
+    if (patchResource.resourceType !== 'Binary') {
+      throw badRequest('Patch resource must be a Binary');
+    }
+
+    if (!patchResource.data) {
+      throw badRequest('Missing entry.resource.data');
+    }
+
+    return JSON.parse(Buffer.from(patchResource.data, 'base64').toString('utf8'));
   }
 
   #addReplacementId(fullUrl: string, resource: Resource): void {
