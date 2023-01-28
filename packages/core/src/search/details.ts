@@ -1,5 +1,5 @@
 import { ElementDefinition, SearchParameter } from '@medplum/fhirtypes';
-import { getElementDefinition, globalSchema, PropertyType } from '../types';
+import { buildTypeName, getElementDefinition, globalSchema, PropertyType } from '../types';
 import { capitalize } from '../utils';
 
 export enum SearchParameterType {
@@ -87,7 +87,7 @@ function buildSearchParamterDetails(resourceType: string, searchParam: SearchPar
 
     if (i < expression.length - 1) {
       if (isBackboneElement(propertyType)) {
-        baseType = baseType + capitalize(propertyName);
+        baseType = buildTypeName(elementDefinition.path?.split('.') as string[]);
       } else {
         baseType = propertyType;
       }
