@@ -62,11 +62,8 @@ export function parseSearchRequest(
  * @returns A parsed SearchRequest.
  */
 export function parseSearchUrl(url: URL): SearchRequest {
-  let resourceType = url.pathname;
-  if (resourceType.includes('/')) {
-    resourceType = resourceType.split('/').pop() as string;
-  }
-  return new SearchParser(resourceType as ResourceType, Object.fromEntries(url.searchParams.entries()));
+  const resourceType = url.pathname.split('/').pop() as ResourceType;
+  return new SearchParser(resourceType, Object.fromEntries(url.searchParams.entries()));
 }
 
 class SearchParser implements SearchRequest {
@@ -106,16 +103,6 @@ class SearchParser implements SearchRequest {
     }
 
     switch (code) {
-      case '_account':
-      case '_compartment':
-      case '_project':
-        this.filters.push({
-          code: code,
-          operator: Operator.EQUALS,
-          value,
-        });
-        break;
-
       case '_sort':
         this.#parseSortRule(value);
         break;

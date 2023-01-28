@@ -5,7 +5,7 @@ import { indexSearchParameterBundle, indexStructureDefinitionBundle } from '../t
 import { parseSearchRequest, parseSearchUrl } from './parse';
 import { Operator } from './search';
 
-describe('FHIR Search Utils', () => {
+describe('Search parser', () => {
   beforeAll(() => {
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-types.json') as Bundle);
     indexStructureDefinitionBundle(readJson('fhir/r4/profiles-resources.json') as Bundle);
@@ -28,17 +28,44 @@ describe('FHIR Search Utils', () => {
     });
   });
 
+  test('Parse _account', () => {
+    expect(parseSearchUrl(new URL('https://example.com/fhir/R4/Patient?_account=123'))).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: '_account', operator: Operator.EQUALS, value: '123' }],
+    });
+  });
+
+  test('Parse _account:not', () => {
+    expect(parseSearchUrl(new URL('https://example.com/fhir/R4/Patient?_account:not=123'))).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: '_account', operator: Operator.NOT, value: '123' }],
+    });
+  });
+
+  test('Parse _account not equals', () => {
+    expect(parseSearchUrl(new URL('https://example.com/fhir/R4/Patient?_account=ne123'))).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: '_account', operator: Operator.NOT_EQUALS, value: '123' }],
+    });
+  });
+
   test('Parse Patient _id:not', () => {
-    try {
-      expect(parseSearchUrl(new URL('https://example.com/fhir/R4/Patient?_id:not=1'))).toMatchObject({
-        resourceType: 'Patient',
-        sortRules: [],
-        filters: [{ code: '_id', operator: Operator.NOT_EQUALS, value: '1' }],
-      });
-    } catch (err) {
-      console.log(err);
-      console.log(JSON.stringify(err, null, 2));
-    }
+    expect(parseSearchUrl(new URL('https://example.com/fhir/R4/Patient?_id:not=1'))).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: '_id', operator: Operator.NOT_EQUALS, value: '1' }],
+    });
+  });
+
+  test('Parse name without value', () => {
+    expect(parseSearchRequest('Patient', { name: undefined })).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: 'name', operator: Operator.EQUALS, value: '' }],
+    });
   });
 
   test('Parse Patient name search', () => {
@@ -46,6 +73,14 @@ describe('FHIR Search Utils', () => {
       resourceType: 'Patient',
       sortRules: [],
       filters: [{ code: 'name', operator: Operator.EQUALS, value: 'Homer' }],
+    });
+  });
+
+  test('Parse Patient name missing', () => {
+    expect(parseSearchRequest('Patient', { 'name:missing': 'true' })).toMatchObject({
+      resourceType: 'Patient',
+      sortRules: [],
+      filters: [{ code: 'name', operator: Operator.MISSING, value: 'true' }],
     });
   });
 
