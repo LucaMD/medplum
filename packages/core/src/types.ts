@@ -293,6 +293,48 @@ export function buildTypeName(components: string[]): string {
   return components.map(capitalize).join('');
 }
 
+/**
+ * Returns true if the type schema is a DomainResource.
+ * @param typeSchema The type schema to check.
+ * @returns True if the type schema is a DomainResource.
+ */
+export function isResourceType(typeSchema: TypeSchema): boolean {
+  return typeSchema.structureDefinition?.baseDefinition === 'http://hl7.org/fhir/StructureDefinition/DomainResource';
+}
+
+/**
+ * Returns an array of all resource types.
+ * Note that this is based on globalSchema, and will only return resource types that are currently in memory.
+ * @returns An array of all resource types.
+ */
+export function getResourceTypes(): string[] {
+  const result: string[] = [];
+  for (const [resourceType, typeSchema] of Object.entries(globalSchema.types)) {
+    if (isResourceType(typeSchema)) {
+      result.push(resourceType);
+    }
+  }
+  return result;
+}
+
+/**
+ * Returns the type schema for the resource type.
+ * @param resourceType The resource type.
+ * @returns The type schema for the resource type.
+ */
+export function getResourceTypeSchema(resourceType: string): TypeSchema {
+  return globalSchema.types[resourceType];
+}
+
+/**
+ * Returns the search parameters for the resource type indexed by search code.
+ * @param resourceType The resource type.
+ * @returns The search parameters for the resource type indexed by search code.
+ */
+export function getSearchParameters(resourceType: string): Record<string, SearchParameter> | undefined {
+  return globalSchema.types[resourceType].searchParams;
+}
+
 export function getPropertyDisplayName(path: string): string {
   // Get the property name, which is the remainder after the last period
   // For example, for path "Patient.birthDate"

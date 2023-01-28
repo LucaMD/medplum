@@ -152,19 +152,4 @@ describe('FHIR Router', () => {
     expect(res).toMatchObject(allOk);
     expect(bundle).toBeDefined();
   });
-
-  test('Search invalid search parameter', async () => {
-    const request: FhirRequest = {
-      method: 'GET',
-      url: '/ServiceRequest',
-      body: {},
-      params: {},
-      query: {
-        basedOn: 'ServiceRequest/123',
-      },
-    };
-    const [outcome, resource] = await router.handleRequest(request, repo);
-    console.log('outcome', outcome);
-    console.log('resource', resource);
-  });
 });

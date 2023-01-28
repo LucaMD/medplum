@@ -7,13 +7,15 @@ import {
   forbidden,
   getElementDefinition,
   getReferenceString,
-  globalSchema,
+  getResourceTypes,
+  getResourceTypeSchema,
+  getSearchParameters,
+  isResourceType,
   LRUCache,
   normalizeErrorString,
   Operator,
   parseSearchRequest,
   SearchRequest,
-  TypeSchema,
 } from '@medplum/core';
 import {
   ElementDefinition,
@@ -22,7 +24,6 @@ import {
   Reference,
   Resource,
   ResourceType,
-  SearchParameter,
 } from '@medplum/fhirtypes';
 import {
   ASTNode,
@@ -84,34 +85,6 @@ const typeCache: Record<string, GraphQLOutputType | undefined> = {
   'http://hl7.org/fhirpath/System.String': GraphQLString,
   'http://hl7.org/fhirpath/System.Time': GraphQLString,
 };
-
-// TODO: Move these to @medplum/core
-
-let resourceTypes: string[] | undefined = undefined;
-
-export function isResourceType(typeSchema: TypeSchema): boolean {
-  return typeSchema.structureDefinition?.baseDefinition === 'http://hl7.org/fhir/StructureDefinition/DomainResource';
-}
-
-export function getResourceTypes(): string[] {
-  if (!resourceTypes) {
-    resourceTypes = [];
-    for (const [resourceType, typeSchema] of Object.entries(globalSchema.types)) {
-      if (isResourceType(typeSchema)) {
-        resourceTypes.push(resourceType);
-      }
-    }
-  }
-  return resourceTypes;
-}
-
-export function getResourceTypeSchema(resourceType: string): TypeSchema {
-  return globalSchema.types[resourceType];
-}
-
-export function getSearchParameters(resourceType: string): Record<string, SearchParameter> | undefined {
-  return globalSchema.types[resourceType].searchParams;
-}
 
 /**
  * Cache of "introspection" query results.
