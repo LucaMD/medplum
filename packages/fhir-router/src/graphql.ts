@@ -269,7 +269,7 @@ function buildPropertyFields(resourceType: string, fields: GraphQLFieldConfigMap
     const elementDefinition = getElementDefinition(resourceType, key) as ElementDefinition;
     for (const type of elementDefinition.type as ElementDefinitionType[]) {
       let typeName = type.code as string;
-      if (typeName === 'BackboneElement') {
+      if (typeName === 'Element' || typeName === 'BackboneElement') {
         typeName = buildTypeName(elementDefinition.path?.split('.') as string[]);
       }
 

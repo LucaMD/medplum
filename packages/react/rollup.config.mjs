@@ -16,6 +16,7 @@ const globals = {
   '@mantine/notifications': 'mantine.notifications',
   '@mantine/react': 'mantine.react',
   '@medplum/core': 'medplum.core',
+  '@medplum/fhir-router': 'medplum.fhirRouter',
   '@medplum/mock': 'medplum.mock',
   '@tabler/icons': 'tabler.icons',
   react: 'React',

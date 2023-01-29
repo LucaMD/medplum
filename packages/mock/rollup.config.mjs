@@ -8,6 +8,7 @@ const extensions = ['.ts'];
 
 const globals = {
   '@medplum/core': 'medplum.core',
+  '@medplum/fhir-router': 'medplum.fhirRouter',
   'fast-json-patch': 'fast-json-patch',
 };
 

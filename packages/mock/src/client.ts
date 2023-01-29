@@ -1,4 +1,12 @@
-import { allOk, badRequest, isOk, LoginState, MedplumClient, ProfileResource } from '@medplum/core';
+import {
+  allOk,
+  badRequest,
+  indexStructureDefinition,
+  isOk,
+  LoginState,
+  MedplumClient,
+  ProfileResource,
+} from '@medplum/core';
 import { FhirRequest, FhirRouter, HttpMethod, MemoryRepository } from '@medplum/fhir-router';
 import { Binary, Resource, SearchParameter, StructureDefinition, UserConfiguration } from '@medplum/fhirtypes';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -475,7 +483,8 @@ class MockFetchClient {
       await this.repo.createResource(resource);
     }
 
-    for (const structureDefinition of StructureDefinitionList) {
+    for (const structureDefinition of StructureDefinitionList as StructureDefinition[]) {
+      indexStructureDefinition(structureDefinition);
       await this.repo.createResource(structureDefinition as StructureDefinition);
     }
 

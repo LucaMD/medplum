@@ -8,7 +8,15 @@ import {
   indexStructureDefinitionBundle,
 } from '@medplum/core';
 import { readJson } from '@medplum/definitions';
-import { Binary, Bundle, Encounter, Patient, SearchParameter, ServiceRequest } from '@medplum/fhirtypes';
+import {
+  Binary,
+  Bundle,
+  Encounter,
+  OperationOutcome,
+  Patient,
+  SearchParameter,
+  ServiceRequest,
+} from '@medplum/fhirtypes';
 import { randomUUID } from 'crypto';
 import { FhirRequest } from './fhirrouter';
 import { getRootSchema, graphqlHandler } from './graphql';
@@ -575,5 +583,49 @@ describe('GraphQL', () => {
     };
     const res2 = await graphqlHandler(request2, repo);
     expect(res2[0]?.issue?.[0]?.details?.text).toEqual('Field "resource" exceeds max depth (depth=9, max=8)');
+  });
+
+  test('StructureDefinition query', async () => {
+    const request: FhirRequest = {
+      method: 'POST',
+      url: '/fhir/R4/$graphql',
+      query: {},
+      params: {},
+      body: {
+        query: `{
+          StructureDefinitionList(name: "Patient") {
+            name
+            description
+            snapshot {
+              element {
+                id
+                path
+                min
+                max
+                type {
+                  code
+                  targetProfile
+                }
+                binding {
+                  valueSet
+                }
+                definition
+              }
+            }
+          }
+          SearchParameterList(base: "Patient", _count: 100) {
+            base
+            code
+            type
+            expression
+            target
+          }
+        }`,
+      },
+    };
+    const [outcome, result] = (await graphqlHandler(request, repo)) as [OperationOutcome, any];
+    expect(outcome).toMatchObject(allOk);
+    expect(result.data.StructureDefinitionList).toBeDefined();
+    expect(result.data.SearchParameterList).toBeDefined();
   });
 });
