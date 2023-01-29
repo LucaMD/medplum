@@ -131,29 +131,6 @@ export interface TypeSchema {
 }
 
 /**
- * Creates a new empty IndexedStructureDefinition.
- * @returns The empty IndexedStructureDefinition.
- * @deprecated Use globalSchema
- */
-export function createSchema(): IndexedStructureDefinition {
-  return { types: {} };
-}
-
-function createTypeSchema(
-  typeName: string,
-  structureDefinition: StructureDefinition,
-  elementDefinition: ElementDefinition
-): TypeSchema {
-  return {
-    structureDefinition,
-    elementDefinition,
-    display: typeName,
-    description: elementDefinition.definition,
-    properties: {},
-  };
-}
-
-/**
  * Indexes a bundle of StructureDefinitions for faster lookup.
  * @param bundle A FHIR bundle StructureDefinition resources.
  * @see {@link IndexedStructureDefinition} for more details on indexed StructureDefinitions.
@@ -204,8 +181,18 @@ function indexType(structureDefinition: StructureDefinition, elementDefinition: 
   }
   const parts = path.split('.');
   const typeName = buildTypeName(parts);
-  globalSchema.types[typeName] = createTypeSchema(typeName, structureDefinition, elementDefinition);
-  globalSchema.types[typeName].parentType = buildTypeName(parts.slice(0, parts.length - 1));
+  let typeSchema = globalSchema.types[typeName];
+
+  if (!typeSchema) {
+    globalSchema.types[typeName] = typeSchema = {} as TypeSchema;
+  }
+
+  typeSchema.parentType = typeSchema.parentType || buildTypeName(parts.slice(0, parts.length - 1));
+  typeSchema.display = typeSchema.display || typeName;
+  typeSchema.structureDefinition = typeSchema.structureDefinition || structureDefinition;
+  typeSchema.elementDefinition = typeSchema.elementDefinition || elementDefinition;
+  typeSchema.description = typeSchema.description || elementDefinition.definition;
+  typeSchema.properties = typeSchema.properties || {};
 }
 
 /**
